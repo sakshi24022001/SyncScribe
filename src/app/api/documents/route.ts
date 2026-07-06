@@ -16,16 +16,17 @@ const createSchema = z.object({
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  const userId = session.user.id;
 
-  const docs = await withTenantScope(session.user.id, (tx) =>
+  const docs = await withTenantScope(userId, (tx) =>
     tx.document.findMany({
-      where: { members: { some: { userId: session.user!.id } } },
+      where: { members: { some: { userId } } },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
         title: true,
         updatedAt: true,
-        members: { where: { userId: session.user!.id }, select: { role: true } },
+        members: { where: { userId }, select: { role: true } },
       },
     })
   );

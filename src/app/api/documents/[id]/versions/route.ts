@@ -27,10 +27,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id: documentId } = await params;
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  const userId = session.user.id;
 
-  const versions = await withTenantScope(session.user.id, async (tx) => {
+  const versions = await withTenantScope(userId, async (tx) => {
     const membership = await tx.documentMember.findUnique({
-      where: { documentId_userId: { documentId, userId: session.user!.id } },
+      where: { documentId_userId: { documentId, userId } },
     });
     if (!membership) throw new Error("forbidden");
 

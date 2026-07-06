@@ -1,0 +1,138 @@
+// ============================================================================
+// PRISMA SCHEMA — Local-First Collaborative Editor
+//
+// Design notes (read this before touching the schema):
+//
+// 1. We do NOT store "the document" as one row that gets overwritten on every
+//    keystroke. That's exactly the design that causes lost updates when two
+//    people edit offline and both reconnect. Instead we store an
+//    append-only log of CRDT updates (`DocUpdate`). The current document
+//    state is a *derived value* — Yjs merges every update in the log
+//    deterministically, regardless of arrival order. This is what makes
+//    sync conflict-free: there is no "last write wins" step anywhere.
+//
+// 2. `DocVersion` is a separate, explicit concept from the update log.
+//    The update log is the sync substrate (small, frequent, CRDT ops).
+//    A "version" is a human-meaningful snapshot (a full serialized Yjs
+//    state vector + document snapshot) that a user deliberately captures,
+//    or that we auto-capture on a timer/size threshold. Restoring a version
+//    does NOT delete history — it appends a *new* update that moves the
+//    CRDT state to match the old snapshot, so collaborators who are mid-edit
+//    never see the document silently vanish or get truncated.
+//
+// 3. Access control is enforced twice: once in the Prisma query layer
+//    (defense in depth) and once via Postgres Row Level Security (the real
+//    boundary — see prisma/rls.sql). Even if application code has a bug,
+//    RLS means a tenant cannot read another tenant's rows at the DB layer.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum DocRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  passwordHash  String?
+  image         String?
+  createdAt     DateTime @default(now())
+
+  memberships   DocumentMember[]
+  ownedDocs     Document[]        @relation("DocOwner")
+  updates       DocUpdate[]
+  versions      DocVersion[]
+
+  @@map("users")
+}
+
+model Document {
+  id            String   @id @default(cuid())
+  title         String   @default("Untitled Document")
+  ownerId       String
+  owner         User     @relation("DocOwner", fields: [ownerId], references: [id])
+
+  // Monotonically increasing counter used as a cheap "server sequence
+  // number" — every accepted update gets the next value. Clients use the
+  // highest seq they've seen to ask "give me everything after N" on pull,
+  // which is O(1) via an index instead of timestamp-range scanning
+  // (timestamps aren't safely sortable across clients with clock skew).
+  seq           Int      @default(0)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  members       DocumentMember[]
+  updates       DocUpdate[]
+  versions      DocVersion[]
+
+  @@index([ownerId])
+  @@map("documents")
+}
+
+model DocumentMember {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        DocRole  @default(VIEWER)
+  createdAt   DateTime @default(now())
+
+  @@unique([documentId, userId])
+  @@index([userId])
+  @@map("document_members")
+}
+
+// Append-only CRDT update log. Each row is one Yjs binary update
+// (a small diff, typically bytes to low-KB), never the whole document.
+model DocUpdate {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+
+  // Client-generated id lets the server dedupe safely if a client retries
+  // a push after a dropped response (network flaked after the write
+  // committed but before the ack arrived).
+  clientOpId  String
+  seq         Int
+  payload     Bytes    // binary Yjs update, size-capped — see validation.ts
+  byteSize    Int
+  createdAt   DateTime @default(now())
+
+  @@unique([documentId, clientOpId])
+  @@index([documentId, seq])
+  @@map("doc_updates")
+}
+
+model DocVersion {
+  id            String   @id @default(cuid())
+  documentId    String
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  authorId      String
+  author        User     @relation(fields: [authorId], references: [id])
+
+  label         String?
+  snapshot      Bytes    // full Yjs state vector at time of capture
+  seqAtCapture  Int      // which update seq this snapshot corresponds to
+  byteSize      Int
+  isAutoCapture Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([documentId, createdAt])
+  @@map("doc_versions")
+}

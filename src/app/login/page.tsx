@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * Split into an outer default export (wrapped in Suspense) and an inner
+ * component that actually calls useSearchParams(). Next.js requires any
+ * component using useSearchParams() to sit inside a Suspense boundary,
+ * since the hook depends on client-side URL data that isn't available
+ * during static prerendering — without the boundary, the build fails
+ * with "useSearchParams() should be wrapped in a suspense boundary."
+ */
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const params = useSearchParams();
@@ -39,5 +47,13 @@ export default function LoginPage() {
         </button>
       </form>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto mt-24 max-w-sm p-6 text-sm text-muted-foreground">Loading…</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

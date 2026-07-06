@@ -59,6 +59,16 @@ That one decision is what makes everything else possible:
 | **Testing** | Unit tests prove merge commutativity, idempotency, and payload validation; Playwright e2e tests prove real offline persistence and concurrent-offline reconciliation in an actual browser |
 | **CI/CD** | `.github/workflows/ci.yml` — lint, migrate, apply RLS, run unit + e2e tests, build |
 
+
+## Demo credentials
+
+Since there's no public sign-up flow in this project (accounts are seeded directly), here's a demo account for trying out the live deployment:
+
+```
+Email:    demo@example.com
+Password: demo-password-123
+```
+
 ## The two hardest problems this project solves
 
 **Preventing a malformed or massive payload from crashing the server.**

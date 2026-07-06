@@ -24,7 +24,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { withTenantScope } from "@/lib/db";
 import { parseAndBoundPush, checkRateLimit, MAX_BATCH_BYTES } from "@/lib/validation";
-import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
@@ -87,37 +86,29 @@ export async function POST(req: NextRequest) {
         throw new StaleClientError();
       }
 
-      let newSeq = doc.seq;
-      const acceptedClientOpIds: string[] = [];
-
-      for (const update of updates) {
-        newSeq += 1;
+      // Batched insert: one round trip to the database instead of one
+      // round trip PER update. The earlier per-item loop was correct but
+      // slow over a remote connection — with a large backlog of queued
+      // offline edits, sequential awaits added up past the transaction
+      // timeout. `createMany` with `skipDuplicates` does the same
+      // idempotent-retry handling (a duplicate clientOpId is silently
+      // skipped rather than erroring) in a single query.
+      const rows = updates.map((update, i) => {
         const buf = Buffer.from(update.payload, "base64");
-        try {
-          await tx.docUpdate.create({
-            data: {
-              documentId,
-              authorId: userId,
-              clientOpId: update.clientOpId,
-              seq: newSeq,
-              payload: buf,
-              byteSize: buf.byteLength,
-            },
-          });
-          acceptedClientOpIds.push(update.clientOpId);
-        } catch (e) {
-          // Unique constraint violation => this exact op was already
-          // applied in a previous attempt (server ack was lost, client
-          // retried). Treat as success, not an error, and don't consume
-          // a new seq number for it.
-          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-            newSeq -= 1;
-            acceptedClientOpIds.push(update.clientOpId);
-            continue;
-          }
-          throw e;
-        }
-      }
+        return {
+          documentId,
+          authorId: userId,
+          clientOpId: update.clientOpId,
+          seq: doc.seq + i + 1,
+          payload: buf,
+          byteSize: buf.byteLength,
+        };
+      });
+
+      await tx.docUpdate.createMany({ data: rows, skipDuplicates: true });
+
+      const newSeq = doc.seq + rows.length;
+      const acceptedClientOpIds = updates.map((u) => u.clientOpId);
 
       await tx.document.update({ where: { id: documentId }, data: { seq: newSeq } });
 

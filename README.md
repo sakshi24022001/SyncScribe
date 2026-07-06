@@ -1,26 +1,17 @@
-# Local-First Collaborative Document Editor
+# SyncScribe
 
-A document editor that works fully offline, merges concurrent edits from
-multiple collaborators deterministically (no data loss, no "last write
-wins"), and lets users travel back through version history without
-corrupting the live document for anyone else currently editing.
+A collaborative document editor that works fully offline, merges concurrent edits from multiple people deterministically (no data loss, no "last write wins"), and lets you travel back through version history without corrupting the live document for anyone else currently editing.
 
-Built for the House of Edtech Fullstack Developer assignment.
+## What makes this different from a normal document editor
 
-## Why this architecture
+Most collaborative editors treat the server as the source of truth and the browser as a thin client. SyncScribe inverts that:
 
-The brief explicitly rules out CRUD-app thinking and asks for real
-distributed-systems problem solving: race conditions, merge algorithms,
-browser memory management. Here's the core decision that everything else
-follows from:
+**The browser's local storage (IndexedDB) is the source of truth. The server is just where everyone's changes meet and merge.**
 
-**The client's local storage (IndexedDB) is the source of truth, not the
-server.** The server is an append-only log of CRDT operations plus a
-place to compute snapshots. This single decision is what makes "zero
-network requests blocking the UI" and "no overwriting offline work"
-possible at the same time — there's no server round trip standing between
-a keystroke and it appearing on screen, and there's no "upload the whole
-document" step that could clobber someone else's concurrent write.
+That one decision is what makes everything else possible:
+- You can open, edit, and close a document with **zero network requests ever blocking the UI** — even fully offline.
+- When you reconnect, your changes and everyone else's changes **merge automatically and safely** — nothing gets silently overwritten.
+- Version history is **non-destructive** — restoring an old version never deletes anyone's newer work, even if they're actively editing at that exact moment.
 
 ## Architecture at a glance
 
@@ -49,47 +40,34 @@ document" step that could clobber someone else's concurrent write.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## How each requirement is satisfied
+## Core features
 
-| Requirement | Implementation |
+| Feature | How it works |
 |---|---|
-| Local-first, zero blocking UI | `src/hooks/useDocument.ts` loads from IndexedDB on mount before any network call; `src/lib/localdb.ts` is the durable store |
-| Background sync engine | `src/lib/syncEngine.ts` — debounce, single-flight, exponential backoff+jitter, offline/online listeners |
-| Deterministic conflict resolution | Yjs CRDT (`src/lib/crdt.ts`) — updates commute; proven in `tests/unit/merge.test.ts` |
-| No overwrite of offline work on reconnect | Server never overwrites, only appends (`doc_updates` table); client applies incoming updates as more CRDT ops, not a replace |
-| Version history / time travel | `doc_versions` table + `/api/documents/:id/versions`; restore computes a CRDT diff-update rather than deleting rows (`buildRestoreUpdate`) |
-| Restore doesn't corrupt live collaborators | Restore is expressed as one more ordinary update through the same sync path everyone else already receives |
-| Robust payload validation / anti-OOM | `src/lib/validation.ts` — size ceilings checked before decode, batch caps, structural zod schema, token-bucket rate limit |
-| RBAC: Owner/Editor/Viewer | `DocumentMember.role`; enforced in every mutating route + Postgres RLS (`prisma/rls.sql`) |
-| Viewers can't push | Explicit role check in `/api/sync/push`, backed by RLS `WITH CHECK` on `doc_updates` insert |
-| Auth | Auth.js v5, JWT sessions, credentials provider (`src/lib/auth.ts`) |
-| Tenant isolation | Postgres Row Level Security, `app.current_user_id` session var set per-transaction (`withTenantScope` in `src/lib/db.ts`) |
-| AI add-on | `/api/ai/summarize` — streaming summarize/action-items/clarity rewrite via Vercel AI SDK |
-| Accessibility | `aria-live` status region, labelled textarea, semantic fieldset/legend in share dialog |
-| Testing | Unit tests prove merge commutativity + idempotency + validation guards; Playwright e2e proves offline persistence and concurrent-offline reconciliation |
-| CI/CD | `.github/workflows/ci.yml` — lint, migrate, RLS apply, unit+e2e tests, build, deploy on merge to main |
+| **Local-first editing** | `src/hooks/useDocument.ts` loads from IndexedDB on mount before any network call; `src/lib/localdb.ts` is the durable client-side store |
+| **Background sync engine** | `src/lib/syncEngine.ts` — debounced pushes, single-flight coalescing, exponential backoff with jitter, offline/online detection |
+| **Deterministic conflict resolution** | Powered by Yjs CRDTs (`src/lib/crdt.ts`) — merges are order-independent by construction; proven in `tests/unit/merge.test.ts` |
+| **No lost work on reconnect** | The server never overwrites, only appends (`doc_updates` table); incoming updates are merged as more CRDT ops, never a destructive replace |
+| **Version history / time travel** | `doc_versions` table + `/api/documents/:id/versions`; restoring computes a CRDT diff-update rather than deleting rows |
+| **Restore-safe for live collaborators** | A restore is just one more ordinary update flowing through the same sync path everyone already uses — nothing special, nothing destructive |
+| **Hardened against malformed/oversized payloads** | `src/lib/validation.ts` — size ceilings checked before decoding, batch caps, structural schema validation, token-bucket rate limiting |
+| **Role-based access (Owner / Editor / Viewer)** | Enforced in every mutating API route *and* at the database level via Postgres Row Level Security (`prisma/rls.sql`) |
+| **Authentication** | Auth.js v5, JWT sessions, credentials provider (`src/lib/auth.ts`) |
+| **Tenant isolation** | Postgres RLS keyed off a per-transaction session variable (`withTenantScope` in `src/lib/db.ts`) |
+| **AI-powered add-ons** | `/api/ai/summarize` — streaming summarize / action-item extraction / clarity rewrite via the Vercel AI SDK |
+| **Accessibility** | Live-region connection status, labelled form controls, semantic fieldsets throughout |
+| **Testing** | Unit tests prove merge commutativity, idempotency, and payload validation; Playwright e2e tests prove real offline persistence and concurrent-offline reconciliation in an actual browser |
+| **CI/CD** | `.github/workflows/ci.yml` — lint, migrate, apply RLS, run unit + e2e tests, build |
 
-## Handling the two hardest questions the brief asks
+## The two hardest problems this project solves
 
-**"How do you prevent a malformed/massive payload from OOMing the
-server?"** — Layered before any expensive work happens: Content-Length
-pre-check → structural schema validation → per-item and per-batch byte
-caps checked on the *encoded* string length (so we never allocate the
-decoded buffer just to discover it's too big) → per-user token-bucket
-rate limiting. See `src/lib/validation.ts` and the request-handling
-order documented at the top of `src/app/api/sync/push/route.ts`.
+**Preventing a malformed or massive payload from crashing the server.**
+Every sync request passes through layered checks before any expensive work happens: a Content-Length pre-check (reject before buffering), structural schema validation (zod), per-item and per-batch byte ceilings checked on the *encoded* string length (so memory is never allocated just to discover a payload is too big), and per-user rate limiting. See `src/lib/validation.ts`.
 
-**"How do you avoid state-sync race conditions?"** — By choosing a data
-structure (CRDT) where merge order doesn't matter, most "race conditions"
-in the traditional sense (two writers, one winner) simply don't exist —
-both writers' content survives. What remains are engineering races around
-*when* to talk to the network, handled explicitly in `syncEngine.ts`:
-single-flight coalescing, debounced pushes, idempotent retries via
-client-generated op IDs, and a 409-triggers-pull-then-retry protocol for
-stale sequence numbers. Each is called out with an inline comment at the
-point it's handled.
+**Avoiding state-sync race conditions.**
+Choosing a CRDT (rather than a plain diff/overwrite model) means most classic "two writers, one winner" races simply don't exist — both people's edits survive by construction. What's left are engineering-level races around *when* to talk to the network, which `syncEngine.ts` handles explicitly: single-flight coalescing so concurrent sync triggers don't fire overlapping requests, debounced pushes so rapid typing doesn't spam the network, idempotent retries via client-generated operation IDs so a dropped response never double-applies an edit, and a pull-then-retry protocol when a client's view of the server is stale.
 
-## Running locally
+## Getting started
 
 ```bash
 cp .env.example .env        # fill in DATABASE_URL, NEXTAUTH_SECRET, OPENAI_API_KEY
@@ -102,20 +80,19 @@ npm run dev
 ## Testing
 
 ```bash
-npm run test        # unit tests: CRDT determinism, validation guards
+npm run test         # unit tests: CRDT determinism, validation guards
 npm run test:e2e     # Playwright: offline persistence + concurrent reconciliation
 ```
 
-## Known simplifications (be upfront about these in review/interview)
+## Tech stack
 
-- The editor binding is a hand-rolled diff over a `<textarea>` for
-  clarity; a production system would use `y-prosemirror` for real
-  rich-text (bold/headings/lists) with the same underlying Yjs doc.
-- Rate limiting uses an in-memory token bucket; swap for Redis to work
-  correctly across multiple server instances.
-- Real-time presence/cursors (who else is viewing) isn't implemented —
-  the brief asks for offline sync + version control specifically, not
-  live cursors; would add a WebSocket awareness channel (`y-protocols/awareness`) on top of this if scoped in.
-- Auto-capture of versions on a timer/size threshold is designed for
-  (`isAutoCapture` field) but the capture trigger itself isn't wired to a
-  cron/queue in this scaffold.
+Next.js 16 · React 19 · TypeScript · Yjs (CRDT) · IndexedDB · PostgreSQL · Prisma · Auth.js v5 · Tailwind CSS · Radix UI · Vercel AI SDK · Vitest · Playwright
+
+## Known simplifications
+
+Being upfront about where this scaffold takes shortcuts, and what a production version would change:
+
+- The editor binding is a hand-rolled diff over a `<textarea>` for clarity; a production system would use `y-prosemirror` for real rich-text formatting (bold, headings, lists) on top of the same underlying Yjs document.
+- Rate limiting uses an in-memory token bucket; a multi-instance deployment would need this backed by Redis instead.
+- Real-time presence/cursors (seeing who else is currently viewing) isn't implemented — this focuses on offline sync and version control specifically; live presence would layer a WebSocket awareness channel (`y-protocols/awareness`) on top of the existing sync engine.
+- Automatic version capture on a timer/size threshold is designed for (`isAutoCapture` field exists on the schema) but the trigger itself isn't wired to a scheduled job in this scaffold — versions are currently captured manually.

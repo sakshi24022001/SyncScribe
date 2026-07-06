@@ -13,7 +13,12 @@ export default function DocumentPage({ params }: { params: Promise<{ id: string 
 
   // In a full build this comes from a server component fetch of
   // DocumentMember.role for the session user; simplified here for clarity.
-  const role: "OWNER" | "EDITOR" | "VIEWER" = "OWNER";
+  function getPlaceholderRole(): "OWNER" | "EDITOR" | "VIEWER" {
+    return "OWNER";
+  }
+
+  // inside the component:
+  const role = getPlaceholderRole();
   const canEdit = role !== "VIEWER";
 
   return (

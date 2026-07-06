@@ -1,7 +1,6 @@
 /**
  * POST /api/ai/summarize
  *
- * AI add-on feature (assignment: "good to have — AI-SDK/OpenAI/Gemini/Groq").
  * Implemented as summarize / tone-rewrite / action-item extraction over
  * the current document text, streamed back to the client via the Vercel
  * AI SDK so the UI can render tokens as they arrive instead of waiting on
@@ -48,6 +47,8 @@ export async function POST(req: NextRequest) {
       { status: 503 }
     );
   }
+
+  
   const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   const session = await auth();

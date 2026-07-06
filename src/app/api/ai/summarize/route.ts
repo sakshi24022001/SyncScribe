@@ -44,6 +44,8 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401 });
   }
 
+  const userId = session.user.id;
+
   const parsed = requestSchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return new Response(JSON.stringify({ error: "invalid request" }), { status: 400 });
@@ -53,9 +55,9 @@ export async function POST(req: NextRequest) {
   // Even a read-oriented AI feature respects document membership — a
   // non-member should not be able to exfiltrate document content via the
   // AI endpoint.
-  const membership = await withTenantScope(session.user.id, (tx) =>
+  const membership = await withTenantScope(userId, (tx) =>
     tx.documentMember.findUnique({
-      where: { documentId_userId: { documentId, userId: session.user!.id } },
+      where: { documentId_userId: { documentId, userId } },
     })
   );
   if (!membership) {

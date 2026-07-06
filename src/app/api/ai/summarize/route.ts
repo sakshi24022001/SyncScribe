@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "forbidden" }), { status: 403 });
   }
 
-  const result = streamText({
+  const result = await streamText({
     model: openai("gpt-4o-mini"),
     system: "You are a concise writing assistant embedded in a document editor.",
     prompt: `${PROMPTS[mode]}\n\n---\n${text}`,

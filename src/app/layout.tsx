@@ -16,9 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Required by submission guidelines: name + profile links */}
           <footer className="border-t border-border px-6 py-4 text-center text-xs text-muted-foreground">
             Built by{" "}
-            <span className="font-medium text-foreground">YOUR_NAME_HERE</span> ·{" "}
+            <span className="font-medium text-foreground">Sakshi Balodiya</span> ·{" "}
             <a
-              href="https://github.com/YOUR_GITHUB_HANDLE"
+              href="https://github.com/sakshi24022001"
               className="underline hover:text-foreground"
               target="_blank"
               rel="noreferrer"
@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </a>{" "}
             ·{" "}
             <a
-              href="https://www.linkedin.com/in/YOUR_LINKEDIN_HANDLE"
+              href="https://www.linkedin.com/in/sakshi-balodiya-669358191/"
               className="underline hover:text-foreground"
               target="_blank"
               rel="noreferrer"

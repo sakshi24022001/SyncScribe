@@ -30,8 +30,6 @@ const requestSchema = z.object({
   mode: z.enum(["summarize", "action_items", "improve_clarity"]),
 });
 
-const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 const PROMPTS: Record<string, string> = {
   summarize: "Summarize the following document in 3-5 concise bullet points.",
   action_items: "Extract clear, actionable to-do items from the following document as a bullet list.",
@@ -39,6 +37,19 @@ const PROMPTS: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
+  // Created inside the handler, not at module top-level: constructing this
+  // at import time meant a missing OPENAI_API_KEY crashed the entire build
+  // during Next.js's "collect page data" step, before any request ever
+  // ran. Deferring construction to request-time turns a missing key into
+  // an ordinary, catchable runtime error instead of a build failure.
+  if (!process.env.OPENAI_API_KEY) {
+    return new Response(
+      JSON.stringify({ error: "AI feature is not configured (missing OPENAI_API_KEY)" }),
+      { status: 503 }
+    );
+  }
+  const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
   const session = await auth();
   if (!session?.user?.id) {
     return new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401 });

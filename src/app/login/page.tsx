@@ -46,6 +46,13 @@ function LoginForm() {
           Sign in
         </button>
       </form>
+
+      <p className="mt-4 text-center text-sm text-muted-foreground">
+        Don&apos;t have an account?{" "}
+        <a href="/register" className="underline hover:text-foreground">
+          Create one
+        </a>
+      </p>
     </main>
   );
 }

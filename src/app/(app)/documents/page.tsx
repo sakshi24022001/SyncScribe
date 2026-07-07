@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FilePlus, FileText } from "lucide-react";
+import { LogoutButton } from "@/components/LogoutButton";
 
 interface DocSummary {
   id: string;
@@ -44,12 +45,15 @@ export default function DocumentsListPage() {
     <main className="mx-auto max-w-2xl p-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Your Documents</h1>
-        <button
-          onClick={createDoc}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground"
-        >
-          <FilePlus className="h-4 w-4" aria-hidden="true" /> New document
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={createDoc}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground"
+          >
+            <FilePlus className="h-4 w-4" aria-hidden="true" /> New document
+          </button>
+          <LogoutButton />
+        </div>
       </div>
 
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
